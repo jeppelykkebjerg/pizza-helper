@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, "URW Palladio L", Georgia, serif';
 const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif';
+const COLD = '#3D5239';
 
 const RECIPE_URL = 'https://jonsmadklub.dk/blogs/opskrifter/italiensk-pizzadej';
 
@@ -24,6 +25,12 @@ const RATIO = {
 };
 
 const JON_HYDRATION = 69;
+
+// Hævetid – referencer ved 22 °C med Jons gærmængde (0,17 %).
+// Tiderne fordobles for hver ~8 °C temperaturen falder (Q10-tommelfingerregel).
+const REF_TEMP = 22;
+const REF_BULK_HOURS = 0.75; // efter æltning, før køl
+const REF_FINAL_HOURS = 4.0; // efter køl, før bagning
 
 function formatYeastTsp(grams) {
   const tsp = grams / 3;
@@ -52,10 +59,23 @@ function formatYeastGrams(g) {
   return (Math.round(g * 10) / 10).toFixed(1).replace('.', ',');
 }
 
+function formatHours(hours) {
+  if (hours <= 0) return '< ¼ time';
+  const q = Math.round(hours * 4) / 4;
+  const whole = Math.floor(q);
+  const frac = q - whole;
+  const fracMap = { 0: '', 0.25: '¼', 0.5: '½', 0.75: '¾' };
+  const fracStr = fracMap[frac] || '';
+  const word = whole < 2 ? 'time' : 'timer';
+  if (whole === 0) return `${fracStr} ${word}`;
+  return `${whole}${fracStr} ${word}`;
+}
+
 export default function App() {
   const [numPizzas, setNumPizzas] = useState(4);
   const [ballWeight, setBallWeight] = useState(260);
   const [hydration, setHydration] = useState(JON_HYDRATION);
+  const [roomTemp, setRoomTemp] = useState(REF_TEMP);
 
   const totalDough = numPizzas * ballWeight;
   const H = hydration / 100;
@@ -72,9 +92,15 @@ export default function App() {
   const yeastFresh = formatGrams(flourGrams * RATIO.yeastFresh, 5);
   const sourdough = formatGrams(flourGrams * RATIO.sourdough);
 
+  // Hævetid – kun temperaturen varierer (gær % er fast i Jons opskrift)
+  const tempFactor = Math.pow(2, (REF_TEMP - roomTemp) / 8);
+  const bulkHours = REF_BULK_HOURS * tempFactor;
+  const finalHours = REF_FINAL_HOURS * tempFactor;
+
   const stepPizza = (d) => setNumPizzas((n) => Math.max(1, Math.min(30, n + d)));
   const stepBall = (d) => setBallWeight((w) => Math.max(150, Math.min(400, w + d)));
   const stepHydration = (d) => setHydration((h) => Math.max(55, Math.min(80, h + d)));
+  const stepTemp = (d) => setRoomTemp((t) => Math.max(16, Math.min(28, t + d)));
 
   return (
     <div
@@ -267,6 +293,82 @@ export default function App() {
           </div>
         </div>
 
+        {/* Hævetid */}
+        <div style={{ marginTop: '40px' }}>
+          <div
+            style={{
+              fontSize: '11px',
+              letterSpacing: '0.22em',
+              textTransform: 'uppercase',
+              color: '#9B3A1F',
+              fontWeight: 600,
+              marginBottom: '4px',
+            }}
+          >
+            Hævetid
+          </div>
+          <h2
+            style={{
+              fontFamily: SERIF,
+              fontStyle: 'italic',
+              fontWeight: 400,
+              fontSize: '24px',
+              margin: '0 0 16px',
+              color: '#241B14',
+            }}
+          >
+            planlæg pizzaaftenen
+          </h2>
+
+          <div style={{ marginBottom: '14px' }}>
+            <Stepper
+              label="Stuetemperatur"
+              value={roomTemp}
+              suffix="°C"
+              onMinus={() => stepTemp(-1)}
+              onPlus={() => stepTemp(1)}
+              onChange={(v) => setRoomTemp(Math.max(16, Math.min(28, v || 16)))}
+              hint={`Reference: ${REF_TEMP} °C med ${BASE.yeastDry} g tørgær pr. 600 g mel`}
+            />
+          </div>
+
+          <div style={{ paddingTop: '4px' }}>
+            <ProofStage
+              step="1"
+              name="Forhævning"
+              time={formatHours(bulkHours)}
+              note={`ved ${roomTemp} °C, før køleskab`}
+            />
+            <ProofStage
+              step="2"
+              name="Kold hævning"
+              time="48 – 72 timer"
+              note="i køleskab (3–5 °C)"
+              cold
+            />
+            <ProofStage
+              step="3"
+              name="Slut-hævning"
+              time={formatHours(finalHours)}
+              note={`ved ${roomTemp} °C, før bagning`}
+              last
+            />
+          </div>
+
+          <div
+            style={{
+              marginTop: '14px',
+              fontSize: '11.5px',
+              fontFamily: SERIF,
+              fontStyle: 'italic',
+              color: '#8B7660',
+              lineHeight: 1.5,
+            }}
+          >
+            Tiderne er omtrentlige — dejen er klar, når den har fordoblet sig og giver let efter ved tryk.
+          </div>
+        </div>
+
         {/* Kilde-link */}
         <div
           style={{
@@ -316,17 +418,6 @@ export default function App() {
               ↗
             </span>
           </a>
-          <div
-            style={{
-              fontSize: '12.5px',
-              color: '#8B7660',
-              fontStyle: 'italic',
-              fontFamily: SERIF,
-              marginTop: '14px',
-            }}
-          >
-            minimum 48 timer på køl
-          </div>
         </div>
       </div>
     </div>
@@ -562,6 +653,86 @@ function AltRow({ name, value, unit, last }) {
             {unit}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ProofStage({ step, name, time, note, cold, last }) {
+  const accent = cold ? COLD : '#9B3A1F';
+  const accentBg = cold ? 'rgba(61,82,57,0.12)' : 'rgba(155,58,31,0.10)';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: '14px',
+        alignItems: 'flex-start',
+        padding: '14px 0',
+        borderBottom: last ? 'none' : '1px dashed rgba(36,27,20,0.18)',
+      }}
+    >
+      <div
+        style={{
+          width: '26px',
+          height: '26px',
+          borderRadius: '50%',
+          background: accentBg,
+          color: accent,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: SERIF,
+          fontSize: '13px',
+          fontWeight: 500,
+          flexShrink: 0,
+          marginTop: '2px',
+        }}
+      >
+        {step}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            gap: '12px',
+          }}
+        >
+          <div
+            style={{
+              fontFamily: SERIF,
+              fontSize: '20px',
+              color: '#241B14',
+              lineHeight: 1.1,
+            }}
+          >
+            {name}
+          </div>
+          <div
+            style={{
+              fontFamily: SERIF,
+              fontSize: '20px',
+              color: accent,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              fontFeatureSettings: '"tnum"',
+            }}
+          >
+            {time}
+          </div>
+        </div>
+        <div
+          style={{
+            fontFamily: SERIF,
+            fontStyle: 'italic',
+            fontSize: '12.5px',
+            color: '#8B7660',
+            marginTop: '3px',
+          }}
+        >
+          {note}
+        </div>
       </div>
     </div>
   );
